@@ -580,11 +580,11 @@ def max_pool1d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
         return _unimplemented("max_pool1d_with_indices", "dilation")
     if stride is None:
         stride = kernel_size
-    r = g.op("MaxPool", input,
+    r, indices = g.op("MaxPool", input, outputs=2,
              kernel_shape_i=_single(kernel_size),
              pads_i=_single(padding) * 2,
              strides_i=_single(stride))
-    return r, None
+    return r, indices
 
 
 @parse_args('v', 'is', 'is', 'is', 'is', 'i')
@@ -595,11 +595,11 @@ def max_pool2d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
         return _unimplemented("max_pool2d_with_indices", "dilation")
     if not stride:
         stride = kernel_size
-    r = g.op("MaxPool", input,
+    r, indices = g.op("MaxPool", input, outputs=2,
              kernel_shape_i=_pair(kernel_size),
              pads_i=_pair(padding) * 2,
              strides_i=_pair(stride))
-    return r, None
+    return r, indices
 
 
 @parse_args('v', 'is', 'is', 'is', 'is', 'i')
@@ -610,11 +610,11 @@ def max_pool3d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
         return _unimplemented("max_pool3d_with_indices", "dilation")
     if not stride:
         stride = kernel_size
-    r = g.op("MaxPool", input,
+    r, indices = g.op("MaxPool", input, outputs=2,
              kernel_shape_i=_triple(kernel_size),
              pads_i=_triple(padding) * 2,
              strides_i=_triple(stride))
-    return r, None
+    return r, indices
 
 
 def _avg_pool(name, tuple_fn):
