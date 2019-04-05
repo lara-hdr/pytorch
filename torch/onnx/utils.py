@@ -288,6 +288,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
     if opset_version is None:
         opset_version = _default_onnx_opset_version
     _set_opset_version(opset_version)
+    symbolic_registry = SymbolicRegistry('', opset_version)
     graph, params, torch_out = _model_to_graph(model, args, f, verbose,
                                                training, input_names,
                                                output_names, operator_export_type,
@@ -304,10 +305,11 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
             input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
             opset_version=None, _retain_param_name=False):
-    from torch.onnx.symbolic import _default_onnx_opset_version, _set_opset_version
+    from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
     if opset_version is None:
         opset_version = _default_onnx_opset_version
     _set_opset_version(opset_version)
+    symbolic_registry = SymbolicRegistry('', opset_version)
     graph, params_dict, torch_out = _model_to_graph(model, args, f, verbose,
                                                     training, input_names,
                                                     output_names, operator_export_type,
@@ -501,7 +503,8 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
     # NB: Returning None means the node gets cloned as is into
     # the new graph
     try:
-        import torch.onnx.symbolic
+        import torch.onnx.symbolic_helper
+        # symbolic_registry.load(opset, domain)
 
         # See Note [Export inplace]
         # TODO: I think this is not necessary anymore
@@ -516,7 +519,7 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
             return None
 
         elif ns == "aten":
-            is_exportable_aten_op, op_fn = _is_exportable_aten_op(op_name) # hasattr(torch.onnx.symbolic, op_name) # 
+            is_exportable_aten_op = symbolic_registry.is_exportable(opname)
             is_onnx_aten_export = operator_export_type == OperatorExportTypes.ONNX_ATEN
             is_aten_fallback_export = operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK
             if is_onnx_aten_export or (not is_exportable_aten_op and is_aten_fallback_export):
@@ -533,7 +536,7 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                     warnings.warn("ONNX export failed on ATen operator {} because torch.onnx.symbolic.{} does not exist"
                                   .format(op_name, op_name))
                     return None
-                #fn = _get_op_with_opset_version(op_name) # getattr(torch.onnx.symbolic, op_name) # 
+                fn = symbolic_registry.get_op(opname)
                 return op_fn(g, *inputs, **attrs)
 
         elif ns == "prim":
@@ -563,10 +566,11 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 return new_op_outputs
             else:
                 symbolic_name = 'prim_' + op_name
-                is_exportable, symbolic_fn = _is_exportable_aten_op(symbolic_name) #symbolic_fn = getattr(torch.onnx.symbolic, symbolic_name, None)
-                if not is_exportable: #if symbolic_fn is None:
+                is_exportable = symbolic_registry.is_exportable(opname)
+                if not is_exportable:
                     warnings.warn("ONNX export failed on primitive operator {}; please report a bug".format(op_name))
                     return None
+                symbolic_fn = symbolic_registry.get_op(opname)
                 attrs = {k: n[k] for k in n.attributeNames()}
                 return symbolic_fn(g, *inputs, **attrs)
 

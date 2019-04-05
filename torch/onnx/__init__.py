@@ -7,6 +7,50 @@ PYTORCH_ONNX_CAFFE2_BUNDLE = _C._onnx.PYTORCH_ONNX_CAFFE2_BUNDLE
 ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
 
 
+class SymbolicRegistry:
+    # from collections import defaultdict
+    def SymbolicRegistry(self, domain, version):
+        _registry = {}  # defaultdict(dict)
+        self.load(opset, domain)
+
+    def load(self, domain, version):
+        self.set(domain, version)
+        if not self.is_loaded(domain, version):
+            self._load()
+
+    def _load():
+        # for opname in dir(_symblic_versions[_version]):
+        #    _registry[domain][_version][opname] = _symblic_versions[_version].opname
+        it_version = _version  # - 1
+        while it_opset >= 9:
+            for opname in dir(_symblic_versions[it_version]):
+                if _registry[domain][_version][opname] is None:
+                    _registry[domain][_version][opname] = _symblic_versions[it_version].opname
+            it_version = it_version - 1
+
+    def set(self, domain, version):
+        if _symblic_versions[_version] is None:  # or domain not supported
+            warnings.warn("ONNX export failed. Opset version {} is not supported".format(version))
+        _opset = opset
+        _domain = domain
+
+    def is_loaded(self, opset, domain):
+        return _registry[domain][version] is not None
+
+    def is_exportable(self, opname):
+        return _registry[domain][version][opname]
+
+    def get_op(self):
+        return _registry[domain][version]
+
+    _symblic_versions = {
+        9 : torch.onnx.symbolic_opset9,
+        10 : torch.onnx.symbolic_opset10
+    }
+
+symbolic_registry = None
+
+
 class ExportTypes:
     PROTOBUF_FILE = 1
     ZIP_ARCHIVE = 2
