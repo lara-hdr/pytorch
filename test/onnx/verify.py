@@ -242,7 +242,7 @@ def set_training(model, mode):
             model.train(old_mode)
 
 
-def verify(model, args, backend, verbose=False, training=False, rtol=1e-3, atol=1e-7, test_args=2):
+def verify(model, args, backend, verbose=False, training=False, rtol=1e-3, atol=1e-7, test_args=2, opset_version=None):
     """
     Export a model into ONNX, import it into a specified ONNX backend, and then
     on a few random inputs verify that PyTorch and the backend produced the same
@@ -281,6 +281,7 @@ def verify(model, args, backend, verbose=False, training=False, rtol=1e-3, atol=
             either an integer specifying the number
             of random arguments to generate, or an iterable producing arguments
             to test under.
+        opset_version (int): ONNX opset version to export to
     """
     def _nested_map(condition, fn, condition_msg=None):
         def _map(obj):
@@ -355,13 +356,13 @@ def verify(model, args, backend, verbose=False, training=False, rtol=1e-3, atol=
 
     with set_training(model, training):
         proto_bytes = io.BytesIO()
-        torch_out = torch.onnx._export(model, args, proto_bytes, verbose=verbose)
+        torch_out = torch.onnx._export(model, args, proto_bytes, verbose=verbose, opset_version=opset_version)
         proto = load_bytes(proto_bytes)
         prepared = backend.prepare(proto)
 
         def run(args):
             alt_proto_bytes = io.BytesIO()
-            torch_out = torch.onnx._export(model, args, alt_proto_bytes, verbose=verbose)
+            torch_out = torch.onnx._export(model, args, alt_proto_bytes, verbose=verbose, opset_version=opset_version)
             alt_proto = load_bytes(alt_proto_bytes)
             if proto.SerializeToString() != alt_proto.SerializeToString():
                 # OK, let's try to figure out what happened.

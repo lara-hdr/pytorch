@@ -127,7 +127,7 @@ class TestCaffe2Backend(unittest.TestCase):
         return cuda_model, cuda_input
 
     def run_debug_test(self, model, train, batch_size, state_dict=None,
-                       input=None, use_gpu=True, example_outputs=None):
+                       input=None, use_gpu=True, example_outputs=None, opset_version=None):
         """
         # TODO: remove this from the final release version
         This test is for our debugging only for the case where
@@ -145,17 +145,16 @@ class TestCaffe2Backend(unittest.TestCase):
             model, input = self.convert_cuda(model, input)
 
         onnxir, torch_out = do_export(model, input, export_params=self.embed_params, verbose=False,
-                                      example_outputs=example_outputs)
+                                      example_outputs=example_outputs, opset_version=opset_version)
         if isinstance(torch_out, torch.autograd.Variable):
             torch_out = (torch_out,)
-
         caffe2_out = run_embed_params(onnxir, model, input, state_dict, use_gpu)
         for _, (x, y) in enumerate(zip(torch_out, caffe2_out)):
             np.testing.assert_almost_equal(x.data.cpu().numpy(), y, decimal=3)
 
     def run_actual_test(self, model, train, batch_size, state_dict=None,
                         input=None, use_gpu=True, rtol=0.001, atol=1e-7,
-                        example_outputs=None):
+                        example_outputs=None, opset_version=None):
         """
         This is what the user facing version will look like
         """
@@ -174,19 +173,19 @@ class TestCaffe2Backend(unittest.TestCase):
             model, input = self.convert_cuda(model, input)
 
         # Verify the model runs the same in Caffe2
-        verify.verify(model, input, c2, rtol=rtol, atol=atol)
+        verify.verify(model, input, c2, rtol=rtol, atol=atol, opset_version=opset_version)
 
     def run_model_test(self, model, train, batch_size, state_dict=None,
                        input=None, use_gpu=True, rtol=0.001, atol=1e-7,
-                       example_outputs=None):
+                       example_outputs=None, opset_version=None):
         use_gpu_ = torch.cuda.is_available() and use_gpu
         if self.embed_params:
             self.run_actual_test(model, train, batch_size, state_dict, input,
                                  use_gpu=use_gpu_, rtol=rtol, atol=atol,
-                                 example_outputs=example_outputs)
+                                 example_outputs=example_outputs, opset_version=opset_version)
         else:
             self.run_debug_test(model, train, batch_size, state_dict, input,
-                                use_gpu=use_gpu_, example_outputs=example_outputs)
+                                use_gpu=use_gpu_, example_outputs=example_outputs, opset_version=opset_version)
 
     def test_linear(self):
         class MyModel(torch.nn.Module):
@@ -1220,6 +1219,22 @@ class TestCaffe2Backend(unittest.TestCase):
 
         x = torch.randn(3, 3, requires_grad=True)
         self.run_model_test(NarrowModel(), train=False, input=x, batch_size=BATCH_SIZE)
+    
+    def test_topk(self):
+        class TopKModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.topk(input, 3)
+        model = TopKModel()
+        x = torch.arange(1., 6.)
+        self.run_model_test(TopKModel(), train=False, input=x, batch_size=BATCH_SIZE)
+   
+    def test_topk_opset10(self):
+        class TopKModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.topk(input, 3)
+        model = TopKModel()
+        x = torch.arange(1., 6.)
+        self.run_model_test(TopKModel(), train=False, input=x, batch_size=BATCH_SIZE, opset_version=10)
 
 # a bit of metaprogramming to set up all the rnn tests
 

@@ -13,6 +13,29 @@ from functools import partial, wraps
 import numpy
 import math
 
+__all__ = [ '_parse_arg',
+            'parse_args',
+            '_maybe_get_const',
+            '_maybe_get_scalar',
+            '_get_const',
+            '_unpack_list',
+            '_scalar',
+            '_if_scalar_type_as',
+            '_is_value',
+            '_is_tensor_list',
+            '_unimplemented',
+            '_try_get_scalar_type',
+            '_default_onnx_opset_version',
+            '_onnx_master_opset',
+            '_onnx_stable_opsets',
+            '_export_onnx_opset_version',
+            'cast_pytorch_to_onnx',
+            'scalar_name_to_pytorch',
+            'scalar_type_to_pytorch_type', 
+            '_cast_func_template',
+            'scalar_type_to_onnx'
+    ]
+
 # EDITING THIS FILE? READ THIS FIRST!
 #
 # - This file is ONLY for ATen operators (e.g., operators that show up in the
@@ -55,6 +78,7 @@ import math
 # on the number of dimensions (DimensionedTensorType) which is better than relying on
 # concrete shapes (CompleteTensorType). Doing so will make the export symbolics
 # more robust to different graphs.
+
 
 # ---------------------------------------------------------------------------------
 # Helper functions
@@ -211,6 +235,7 @@ def _set_opset_version(opset_version):
         return
     raise ValueError("Unsupported ONNX opset version: " + str(opset_version))
 
+"""
 
 # add new opsets at the begining of the map to keep it sorted
 # from the most recent to the oldest opset number, and keep
@@ -225,7 +250,7 @@ def _is_exportable_aten_op():
         if opset >= _export_onnx_opset_version and hasattr(symbolic_file, op_name):
             return True, getattr(symbolic_file, op_name)
     return False, None
-
+"""
 
 # Metaprogram symbolics for each ATen native specialized cast operator.
 # For e.g. we specify a function named `_cast_uint8_t` that instantiates an
@@ -290,3 +315,66 @@ scalar_type_to_onnx = [
     cast_pytorch_to_onnx["Float"],
     cast_pytorch_to_onnx["Double"],
 ]
+
+class SymbolicRegistry:
+    _domain = None
+    _version = None
+    _registry = None
+
+    import torch.onnx.symbolic_opset9
+    import torch.onnx.symbolic_opset10
+    _symbolic_versions = {
+        9 : torch.onnx.symbolic_opset9,
+        10 : torch.onnx.symbolic_opset10
+    }
+
+    def __init__(self, domain, version):
+        self._registry = {}
+        self.register_version(domain, version)
+
+    def register_version(self, domain, version):
+        self._set_version(domain, version)
+        if not self.is_registered_version(domain, version):
+            self._register_version()
+
+    def _register_version(self):
+        self._registry[self._domain] = {}
+        self._registry[self._domain][self._version] = {}
+        
+        it_version = self._version
+        while it_version >= 9:
+            symbolic_version = self._symbolic_versions[it_version].__dict__
+            for opname in symbolic_version:
+                if not self.is_registered_op(opname):
+                    self.register_op(opname, symbolic_version[opname])
+            it_version = it_version - 1
+
+    def _set_version(self, domain, version):
+        if self._symbolic_versions[version] is None: # or domain not supported
+            warnings.warn("ONNX export failed. Opset version {} is not supported".format(version))
+        self._version = version
+        self._domain = domain
+
+    def is_registered_version(self, domain, version):
+        return domain in self._registry and version in self._registry[domain] 
+
+    def register_op(self, opname, op, domain=None, version=None):
+        if domain is None:
+            domain = self._domain
+        if version is None:
+            version = self._version
+        self._registry[domain][version][opname] = op
+
+    def is_registered_op(self, opname, domain=None, version=None):
+        if domain is None:
+            domain = self._domain
+        if version is None:
+            version = self._version
+        return domain in self._registry and version in self._registry[domain] and opname in self._registry[domain][version]
+
+    def get_registered_op(self, opname, domain=None, version=None):
+        if domain is None:
+            domain = self._domain
+        if version is None:
+            version = self._version
+        return self._registry[domain][version][opname]

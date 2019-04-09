@@ -7,7 +7,9 @@ import torch.onnx
 # This import monkey-patches graph manipulation methods on Graph, used for the
 # ONNX symbolics
 import torch.onnx.utils
+
 import torch.onnx.symbolic_helper
+from torch.onnx.symbolic_helper import *
 
 from functools import partial, wraps
 
