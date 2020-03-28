@@ -468,6 +468,15 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             strip_doc_string=True, dynamic_axes=None, keep_initializers_as_inputs=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
             enable_onnx_checker=True, use_external_data_format=False):
+    do_constant_folding = False
+    opset_version = 12
+    verbose = True
+    training = TrainingMode.TRAINING
+
+    #f = "office_model.onnx"
+
+
+
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError('torch.nn.DataParallel is not supported by ONNX '
                          'exporter, please use \'attribute\' module to '
