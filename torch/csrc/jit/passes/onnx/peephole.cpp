@@ -836,15 +836,15 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
       auto origNllLossNode = *it;
 
       std::cout << "\n\n\n ~~~~~~~~~~~~  \n\n";
-      Node* softmaxCrossEntropyNode = b->owningGraph()->create(onnx::SoftmaxCrossEntropyLoss, it->outputs().size());//+1);
+      Node* softmaxCrossEntropyNode = b->owningGraph()->create(onnx::SoftmaxCrossEntropyLoss, it->outputs().size()+1);
       
       int i = 0;
       
-      for (i = 0; i < softmaxCrossEntropyNode->outputs().size(); ++i) {
+      for (i = 0; i < softmaxCrossEntropyNode->outputs().size()-1; ++i) {
 	 softmaxCrossEntropyNode->outputs()[i]->copyMetadata(it->outputs()[i]);
       }
       
-      //softmaxCrossEntropyNode->outputs()[i]->copyMetadata(origLogSoftmaxNode->outputs()[0]);
+      softmaxCrossEntropyNode->outputs()[i]->copyMetadata(origLogSoftmaxNode->outputs()[0]);
 
       std::cout << "\n\n ^^^^^^^ \n\n";
       softmaxCrossEntropyNode->copyAttributes(*origNllLossNode);
