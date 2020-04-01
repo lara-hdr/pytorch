@@ -78,9 +78,7 @@ def nll_loss(g, self, target, weight, reduction, ignore_index):
     reduction_vals = ['none', 'mean', 'sum']
     reduction = reduction_vals[reduction]
 
-    print(ignore_index) 
-
-    # when ignore_index is not specified, ignore_index == onnx::Constant[value={-100
+    # when ignore_index is not specified, ignore_index == onnx::Constant[value={-100}]
     ignore_index = sym_help._maybe_get_const(ignore_index, 'i')
     if ignore_index == -100:
         if weight.node().mustBeNone():
@@ -89,17 +87,14 @@ def nll_loss(g, self, target, weight, reduction, ignore_index):
             return g.op("NegativeLogLikelihoodLoss", self, target, weight, reduction_s=reduction)
 
     if ignore_index < 0:
-        print("\n\n\n\n\n +~+~+~+~+~ ", self.type().sizes(), "-\n\n")
         c = self.type().sizes()[1]
         ignore_index += c
 
     # if ignore_index is specified, compute nllloss with no reduction and apply the reduction afterwards
     if weight.node().mustBeNone():
-        return g.op("NegativeLogLikelihoodLoss", self, target, reduction_s=reduction, ignore_index_i=ignore_index)
+        nllloss = g.op("NegativeLogLikelihoodLoss", self, target, reduction_s='none', ignore_index_i=ignore_index)
     else:
-        return g.op("NegativeLogLikelihoodLoss", self, target, weight, reduction_s=reduction, ignore_index_i=ignore_index)
-
- 
+        nllloss = g.op("NegativeLogLikelihoodLoss", self, target, weight, reduction_s='none', ignore_index_i=ignore_index)
 
     return nllloss
 

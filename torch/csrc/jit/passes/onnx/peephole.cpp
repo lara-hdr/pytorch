@@ -821,6 +821,176 @@ void removeMaxPoolUnusedOutput(Block* b) {
     }
   }
 }
+/*
+// This optimization fuses LogSoftmax and NegativeLogLikelihoodLoss operators into
+// one operator: SoftmaxCrossEntropyLoss.
+static void fuseLogSoftmaxNllLoss(Block* b) {
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      fuseLogSoftmaxNllLoss(child_block);
+    }
+    if (it->kind() == onnx::NegativeLogLikelihoodLoss &&
+        it->input(0)->node()->kind() == onnx::LogSoftmax) {
+      auto origLogSoftmaxNode= it->input(0)->node();
+      auto origNllLossNode = *it;
+
+      Node* softmaxCrossEntropyNode = b->owningGraph()->create(onnx::SoftmaxCrossEntropyLoss, it->outputs().size());
+      for (size_t i = 0; i < softmaxCrossEntropyNode->outputs().size(); ++i) {
+         softmaxCrossEntropyNode->outputs()[i]->copyMetadata(it->outputs()[i]);
+      }
+      softmaxCrossEntropyNode->copyAttributes(*origNllLossNode);
+      softmaxCrossEntropyNode->insertBefore(origNllLossNode);
+      softmaxCrossEntropyNode->addInput(origLogSoftmaxNode->inputs().at(0));
+      softmaxCrossEntropyNode->addInput(origNllLossNode->inputs().at(1));
+      if (origNllLossNode->inputs().size() == 3) {
+        softmaxCrossEntropyNode->addInput(origNllLossNode->inputs().at(2));
+      }
+      it->replaceAllUsesWith(softmaxCrossEntropyNode);
+      it->removeAllInputs();
+      origLogSoftmaxNode->destroy();
+      it.destroyCurrent();
+      continue;
+    }
+  }
+}
+*/
+
+ void recursive_del(Node* node) {
+  printf("%s \n", node->kind().toQualString());
+  if (node->kind() == onnx::LogSoftmax) {
+    return;
+  }
+
+  std::vector<Node*> nodeList;
+  for (size_t i = 0; i < node->inputs().size(); ++i) {
+    nodeList.push_back(node->input(i)->node());
+  }
+  node->removeAllInputs();
+
+  if (node->kind() != onnx::NegativeLogLikelihoodLoss) {
+    bool del = true;
+    for (size_t i = 0; i < node->outputs().size(); ++i) {
+      if (!node->outputs()[i]->uses().empty()) {
+        del = false;
+        break;
+      }
+    }
+    if (del) {
+      node->destroy();
+    }
+  }
+
+  for (Node* n: nodeList) {
+    recursive_del(n);
+  }
+}
+
+Node* createSoftmaxCrossEntropyNode(Block* b, graph_node_list_iterator it, std::vector<Value*> values) {
+  Node* softmaxCrossEntropyNode = b->owningGraph()->create(onnx::SoftmaxCrossEntropyLoss, it->outputs().size());
+  for (size_t i = 0; i < softmaxCrossEntropyNode->outputs().size(); ++i) {
+	      softmaxCrossEntropyNode->outputs()[i]->copyMetadata(it->outputs()[i]);
+  }
+  for (Value* value : values) {
+    softmaxCrossEntropyNode->addInput(value);
+  }
+  return softmaxCrossEntropyNode;
+}
+
+static void fuseLogSoftmaxNllLoss(Block* b) {
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      fuseLogSoftmaxNllLoss(child_block);
+    }
+    if (it->kind() == onnx::NegativeLogLikelihoodLoss) {
+      auto prev = it->input(0)->node();
+      Node* origLogSoftmaxNode;
+      Node* origNllLossNode;
+      std::vector<Node*> deleteNodes;
+      Node* softmaxCrossEntropyNode = nullptr;
+      if (prev->kind() == onnx::LogSoftmax) {
+	      origLogSoftmaxNode= it->input(0)->node();
+	      origNllLossNode = *it;
+        deleteNodes.push_back(origLogSoftmaxNode);
+      } else if (prev->kind() == onnx::Transpose &&
+		             prev->input(0)->node()->kind() == onnx::LogSoftmax) {
+	      auto logSoftmaxNode = prev->input(0)->node();
+        origLogSoftmaxNode = logSoftmaxNode->input(0)->node();
+	      origNllLossNode = *it;
+	      prev->removeAllInputs();
+        logSoftmaxNode->removeAllInputs();
+        deleteNodes.push_back(origLogSoftmaxNode);
+        deleteNodes.push_back(logSoftmaxNode);
+        deleteNodes.push_back(prev);
+      } else if (prev->kind() == onnx::Reshape &&
+                 prev->input(0)->node()->kind() == onnx::Transpose &&
+                 prev->input(0)->node()->input(0)->node()->kind() == onnx::LogSoftmax) {
+        origLogSoftmaxNode = prev->input(0)->node()->input(0)->node();
+        auto transpose = origLogSoftmaxNode->input(0)->node();
+        origNllLossNode = *it;
+        auto reshape = origNllLossNode->input(1)->node();
+        std::vector<Value*> values{transpose->inputs().at(0), reshape->inputs().at(0)};
+        if (origNllLossNode->inputs().size() == 3) {
+          values.push_back(origNllLossNode->inputs().at(2));
+        }
+        softmaxCrossEntropyNode = createSoftmaxCrossEntropyNode(b, it, values);
+        origLogSoftmaxNode->removeAllInputs();
+        deleteNodes.push_back(origLogSoftmaxNode);
+        deleteNodes.push_back(transpose);
+        if (!origNllLossNode->output(0)->uses().empty()){
+          auto nllloss_output = origNllLossNode->output(0)->uses()[0].user;
+ 
+          if (nllloss_output->kind() == onnx::Reshape &&
+              nllloss_output->inputs()[1]->node()->kind() == prim::ListConstruct) {
+            auto reshape_after = nllloss_output;
+            auto listconstruct = nllloss_output->inputs()[1]->node(); 
+ 
+            //make output of reshape the output of nllloss
+            reshape_after->replaceAllUsesWith(origNllLossNode);
+ 
+            reshape_after->removeAllInputs();
+            reshape_after->destroy();
+ 
+            auto gather = listconstruct->input(1)->node();
+  
+            listconstruct->removeAllInputs();
+            listconstruct->destroy();
+ 
+            auto shape = gather->input(0)->node();
+            auto constant = gather->input(1)->node();
+            constant->removeAllInputs();
+            shape->removeAllInputs();
+            gather->removeAllInputs();
+            constant->destroy();
+            shape->destroy();
+            gather->destroy();
+          } 
+       }
+
+        recursive_del(origNllLossNode);
+      } else {
+        break;
+      }
+
+      if (!softmaxCrossEntropyNode) {
+        std::vector<Value*> values{origLogSoftmaxNode->inputs().at(0), origNllLossNode->inputs().at(1)};
+        if (origNllLossNode->inputs().size() == 3) {
+          values.push_back(origNllLossNode->inputs().at(2));
+        }
+        softmaxCrossEntropyNode = createSoftmaxCrossEntropyNode(b, it, values);
+      }
+
+      softmaxCrossEntropyNode->copyAttributes(*origNllLossNode);
+      softmaxCrossEntropyNode->insertBefore(origNllLossNode);
+      it->replaceAllUsesWith(softmaxCrossEntropyNode);
+      it->removeAllInputs();
+      for (Node* node : deleteNodes) {
+        node->destroy();
+      }
+      it.destroyCurrent();
+      continue;
+    } 
+  }
+}
 
 
 // This optimization fuses LogSoftmax and NegativeLogLikelihoodLoss operators into
@@ -905,6 +1075,7 @@ void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph, int opset_version, bool
   fuseSplitListUnpack(graph->block());
   convertUnbindToSplit(graph->block(), opset_version);
   convertSplitToDynamic(graph->block(), opset_version);
+  fuseLogSoftmaxNllLoss(graph->block());
   eraseListConstruct(graph->block(), opset_version);
   removeMaxPoolUnusedOutput(graph->block());
   fuseLogSoftmaxNllLoss(graph->block());
