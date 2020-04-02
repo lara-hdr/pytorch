@@ -51,7 +51,7 @@ std::vector<int64_t> composeTransposes(
   return ret;
 }
 
-std::vector<size_t> getBroadcastPositions(Node* node) {
+const std::vector<size_t>& getBroadcastPositions(Node* node) {
   // Most of the element-wise ops in ONNX supports numpy broadcasting.
   // Only GEMM supports one-directional broadcasting, which broadcasts the bias
   // to the product.
@@ -68,17 +68,10 @@ std::vector<size_t> getBroadcastPositions(Node* node) {
           {onnx::Less, {0, 1}},
       };
   static std::vector<size_t> no_positions;
-  std::vector<size_t> positions;
 
   auto iter = broadcast_positions.find(node->kind());
   if (iter != broadcast_positions.end()) {
-    // skip optional input if not provided
-    for (size_t position : iter->second) {
-      if (position < node->inputs().size()) {
-        positions.emplace_back(position);
-      }              
-    }
-    return positions;
+    return iter->second;
   }
   return no_positions;
 }
@@ -110,7 +103,7 @@ void fuseBroadcast(Block* b) {
       fuseBroadcast(child_block);
     }
 
-    auto broadcast_positions = getBroadcastPositions(n);
+    auto& broadcast_positions = getBroadcastPositions(n);
     if (!broadcast_positions.empty()) {
       AT_ASSERT(!n->hasAttribute(attr::axis));
     }
@@ -856,7 +849,7 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
 */
 
  void recursive_del(Node* node) {
-  printf("%s \n", node->kind().toQualString());
+  //printf("%s \n", node->kind().toQualString());
   if (node->kind() == onnx::LogSoftmax) {
     return;
   }
@@ -992,49 +985,6 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
   }
 }
 
-
-// This optimization fuses LogSoftmax and NegativeLogLikelihoodLoss operators into
-// one operator: SoftmaxCrossEntropyLoss.
-static void fuseLogSoftmaxNllLoss(Block* b) {
-  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
-    for (auto* child_block : it->blocks()) {
-      fuseLogSoftmaxNllLoss(child_block);
-    }
-    if (it->kind() == onnx::NegativeLogLikelihoodLoss &&
-        it->input(0)->node()->kind() == onnx::LogSoftmax) {
-      auto origLogSoftmaxNode= it->input(0)->node();
-      auto origNllLossNode = *it;
-
-      std::cout << "\n\n\n ~~~~~~~~~~~~  \n\n";
-      Node* softmaxCrossEntropyNode = b->owningGraph()->create(onnx::SoftmaxCrossEntropyLoss, it->outputs().size()+1);
-      
-      int i = 0;
-      
-      for (i = 0; i < softmaxCrossEntropyNode->outputs().size()-1; ++i) {
-	 softmaxCrossEntropyNode->outputs()[i]->copyMetadata(it->outputs()[i]);
-      }
-      
-      softmaxCrossEntropyNode->outputs()[i]->copyMetadata(origLogSoftmaxNode->outputs()[0]);
-
-      std::cout << "\n\n ^^^^^^^ \n\n";
-      softmaxCrossEntropyNode->copyAttributes(*origNllLossNode);
-      softmaxCrossEntropyNode->insertBefore(origNllLossNode);
-      softmaxCrossEntropyNode->addInput(origLogSoftmaxNode->inputs().at(0));
-      softmaxCrossEntropyNode->addInput(origNllLossNode->inputs().at(1));
-      if (origNllLossNode->inputs().size() == 3) {
-        softmaxCrossEntropyNode->addInput(origNllLossNode->inputs().at(2));
-      }
-      it->replaceAllUsesWith(softmaxCrossEntropyNode);
-      it->removeAllInputs();
-      origLogSoftmaxNode->destroy();
-      it.destroyCurrent();
-      continue;
-    }
-  }
-}
-
-
-
 // This optimization does ONNX-specific peephole optimizations.
 //
 // At the moment, here are the optimizations it does:
@@ -1078,8 +1028,6 @@ void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph, int opset_version, bool
   fuseLogSoftmaxNllLoss(graph->block());
   eraseListConstruct(graph->block(), opset_version);
   removeMaxPoolUnusedOutput(graph->block());
-  fuseLogSoftmaxNllLoss(graph->block());
-
 }
 
 } // namespace jit
